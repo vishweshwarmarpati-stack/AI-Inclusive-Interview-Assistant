@@ -1,0 +1,9 @@
+streamlit
+opencv-python-headless
+numpy
+joblib
+mediapipe
+pyttsx3
+av
+streamlit-webrtc
+faster-whisper
