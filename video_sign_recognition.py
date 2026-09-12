@@ -5,10 +5,11 @@ import joblib
 import time
 
 # ==========================================
-# LOAD TRAINED MODEL
+# LOAD TRAINED 2-HAND MODEL
 # ==========================================
 
-model = joblib.load("models/sign_model.pkl")
+model = joblib.load("data/models/sign_model_2hand.pkl")
+
 
 # ==========================================
 # MEDIAPIPE HAND DETECTION
@@ -19,10 +20,11 @@ mp_draw = mp.solutions.drawing_utils
 
 hands = mp_hands.Hands(
     static_image_mode=False,
-    max_num_hands=1,
+    max_num_hands=2,
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
+
 
 # ==========================================
 # START CAMERA
@@ -30,25 +32,22 @@ hands = mp_hands.Hands(
 
 cap = cv2.VideoCapture(0)
 
+
 # ==========================================
 # SENTENCE VARIABLES
 # ==========================================
 
 sentence = []
 
-# Last accepted sign
 last_sign = None
 last_time = 0
 
-# Current sign being checked
 candidate_sign = None
 candidate_count = 0
 
-# Number of frames required for confirmation
 REQUIRED_FRAMES = 8
-
-# Minimum time between two different signs
 SIGN_DELAY = 1.5
+
 
 # ==========================================
 # MAIN LOOP
@@ -68,20 +67,33 @@ while True:
     # Convert BGR to RGB
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # Detect hand
+    # Detect hands
     results = hands.process(rgb)
 
     current_sign = None
 
     # ==========================================
-    # IF HAND IS DETECTED
+    # IF HANDS ARE DETECTED
     # ==========================================
 
     if results.multi_hand_landmarks:
 
-        for hand_landmarks in results.multi_hand_landmarks:
+        # Create empty 63-feature arrays
+        # for left and right hand
 
-            # Draw hand landmarks
+        left_hand = np.zeros(63)
+        right_hand = np.zeros(63)
+
+        # ==========================================
+        # PROCESS EACH DETECTED HAND
+        # ==========================================
+
+        for hand_landmarks, handedness in zip(
+            results.multi_hand_landmarks,
+            results.multi_handedness
+        ):
+
+            # Draw landmarks
             mp_draw.draw_landmarks(
                 frame,
                 hand_landmarks,
@@ -89,7 +101,7 @@ while True:
             )
 
             # ==========================================
-            # GET 21 HAND LANDMARKS
+            # GET 63 FEATURES
             # ==========================================
 
             data = []
@@ -100,40 +112,66 @@ while True:
                 data.append(landmark.y)
                 data.append(landmark.z)
 
-            # Convert to model input
-            input_data = np.array(data).reshape(1, -1)
+            data = np.array(data)
 
             # ==========================================
-            # PREDICT SIGN
+            # IDENTIFY LEFT / RIGHT HAND
             # ==========================================
 
-            prediction = model.predict(input_data)
+            hand_label = handedness.classification[0].label
 
-            current_sign = str(prediction[0])
+            if hand_label == "Left":
+                left_hand = data
 
-            # Show current prediction
-            cv2.putText(
-                frame,
-                "Current Sign: " + current_sign,
-                (30, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.9,
-                (0, 255, 0),
-                2
-            )
+            elif hand_label == "Right":
+                right_hand = data
 
-            # ==========================================
-            # STABILIZE PREDICTION
-            # ==========================================
+        # ==========================================
+        # COMBINE BOTH HANDS
+        # ==========================================
 
-            if current_sign == candidate_sign:
+        input_data = np.concatenate(
+            [left_hand, right_hand]
+        )
 
-                candidate_count += 1
+        # Should contain 126 features
+        input_data = input_data.reshape(1, -1)
 
-            else:
+        # ==========================================
+        # PREDICT SIGN
+        # ==========================================
 
-                candidate_sign = current_sign
-                candidate_count = 1
+        prediction = model.predict(input_data)
+
+        current_sign = str(prediction[0])
+
+        # ==========================================
+        # SHOW CURRENT PREDICTION
+        # ==========================================
+
+        cv2.putText(
+            frame,
+            "Current Sign: " + current_sign,
+            (30, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (0, 255, 0),
+            2
+        )
+
+        # ==========================================
+        # STABILIZE PREDICTION
+        # ==========================================
+
+        if current_sign == candidate_sign:
+
+            candidate_count += 1
+
+        else:
+
+            candidate_sign = current_sign
+            candidate_count = 1
+
 
     # ==========================================
     # ACCEPT STABLE SIGN
@@ -156,6 +194,7 @@ while True:
 
             candidate_count = 0
 
+
     # ==========================================
     # DISPLAY SENTENCE
     # ==========================================
@@ -171,6 +210,7 @@ while True:
         (255, 255, 255),
         2
     )
+
 
     # ==========================================
     # INSTRUCTIONS
@@ -196,6 +236,7 @@ while True:
         2
     )
 
+
     # ==========================================
     # SHOW CAMERA
     # ==========================================
@@ -204,6 +245,7 @@ while True:
         "AI Inclusive Interview Assistant",
         frame
     )
+
 
     # ==========================================
     # KEYBOARD CONTROLS
@@ -223,6 +265,7 @@ while True:
         last_time = 0
         candidate_sign = None
         candidate_count = 0
+
 
 # ==========================================
 # CLOSE EVERYTHING

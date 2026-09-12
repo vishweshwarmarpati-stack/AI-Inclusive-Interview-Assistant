@@ -1,111 +1,75 @@
+import os
 import cv2
-import numpy as np
 import mediapipe as mp
 import joblib
+import numpy as np
 
-# =========================
-# LOAD TRAINED MODEL
-# =========================
 
-model = joblib.load("models/sign_model.pkl")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# =========================
-# MEDIAPIPE HANDS
-# =========================
+MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "data",
+    "models",
+    "sign_model_2hand.pkl"
+)
+
+model = joblib.load(MODEL_PATH)
 
 mp_hands = mp.solutions.hands
-mp_draw = mp.solutions.drawing_utils
+
 
 hands = mp_hands.Hands(
     static_image_mode=False,
-    max_num_hands=1,
+    max_num_hands=2,
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
 
-# =========================
-# START CAMERA
-# =========================
 
-cap = cv2.VideoCapture(0)
+def recognize_sign(frame):
 
-while True:
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    ret, frame = cap.read()
+    results = hands.process(frame_rgb)
 
-    if not ret:
-        break
+    if not results.multi_hand_landmarks:
+        return None
 
-    # Mirror camera
-    frame = cv2.flip(frame, 1)
+    left_hand = np.zeros(63)
+    right_hand = np.zeros(63)
 
-    # Convert BGR to RGB
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    for hand_landmarks, handedness in zip(
+        results.multi_hand_landmarks,
+        results.multi_handedness
+    ):
 
-    # Detect hands
-    results = hands.process(rgb)
+        landmarks = []
 
-    if results.multi_hand_landmarks:
+        for landmark in hand_landmarks.landmark:
+            landmarks.extend([
+                landmark.x,
+                landmark.y,
+                landmark.z
+            ])
 
-        for hand_landmarks in results.multi_hand_landmarks:
+        landmarks = np.array(landmarks)
 
-            # Draw hand
-            mp_draw.draw_landmarks(
-                frame,
-                hand_landmarks,
-                mp_hands.HAND_CONNECTIONS
-            )
+        label = handedness.classification[0].label
 
-            # =========================
-            # EXTRACT LANDMARKS
-            # =========================
+        if label == "Left":
+            left_hand = landmarks
 
-            data = []
+        elif label == "Right":
+            right_hand = landmarks
 
-            for landmark in hand_landmarks.landmark:
+    features = np.concatenate([
+        left_hand,
+        right_hand
+    ])
 
-                data.append(landmark.x)
-                data.append(landmark.y)
-                data.append(landmark.z)
+    features = features.reshape(1, -1)
 
-            # Convert to NumPy array
-            input_data = np.array(data).reshape(1, -1)
+    prediction = model.predict(features)
 
-            # =========================
-            # PREDICT SIGN
-            # =========================
-
-            prediction = model.predict(input_data)
-
-            sign = prediction[0]
-
-            # =========================
-            # DISPLAY SIGN
-            # =========================
-
-            cv2.putText(
-                frame,
-                str(sign),
-                (30, 60),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.5,
-                (0, 255, 0),
-                3
-            )
-
-    # Show camera
-    cv2.imshow(
-        "AI Sign Recognition",
-        frame
-    )
-
-    # Press Q to quit
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
-
-# =========================
-# CLOSE
-# =========================
-
-cap.release()
-cv2.destroyAllWindows()
+    return prediction[0]

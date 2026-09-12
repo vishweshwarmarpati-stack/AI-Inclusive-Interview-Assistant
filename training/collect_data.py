@@ -3,241 +3,248 @@ import csv
 import os
 import mediapipe as mp
 
-# =============================
-# MEDIAPIPE SETUP
-# =============================
+# --------------------------------------------------
+# PATHS
+# --------------------------------------------------
 
-BaseOptions = mp.tasks.BaseOptions
-HandLandmarker = mp.tasks.vision.HandLandmarker
-HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
-VisionRunningMode = mp.tasks.vision.RunningMode
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-options = HandLandmarkerOptions(
-    base_options=BaseOptions(
-        model_asset_path="models/hand_landmarker.task"
-    ),
-    running_mode=VisionRunningMode.IMAGE,
-    num_hands=1
+DATA_PATH = os.path.join(
+    BASE_DIR,
+    "data",
+    "isl_landmarks_2hand.csv"
 )
 
-landmarker = HandLandmarker.create_from_options(options)
+# --------------------------------------------------
+# MEDIAPIPE HANDS
+# --------------------------------------------------
 
+mp_hands = mp.solutions.hands
+mp_drawing = mp.solutions.drawing_utils
 
-# =============================
-# SIGN NAME
-# =============================
+hands = mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=2,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
 
-label = input(
-    "Enter sign name (example: HELLO): "
-).strip().upper()
+# --------------------------------------------------
+# CSV
+# --------------------------------------------------
+
+os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
+
+file_exists = os.path.exists(DATA_PATH)
+
+header = ["label"]
+
+# Left hand = 21 landmarks × 3
+for i in range(21):
+    header.extend([
+        f"left_x{i}",
+        f"left_y{i}",
+        f"left_z{i}"
+    ])
+
+# Right hand = 21 landmarks × 3
+for i in range(21):
+    header.extend([
+        f"right_x{i}",
+        f"right_y{i}",
+        f"right_z{i}"
+    ])
+
+# --------------------------------------------------
+# START
+# --------------------------------------------------
+
+label = input("Enter sign label: ").strip()
 
 if not label:
-    print("No sign name entered.")
-    landmarker.close()
+    print("Label cannot be empty.")
     exit()
 
+cap = cv2.VideoCapture(0)
 
-# =============================
-# DATA FILE
-# =============================
-
-os.makedirs("data", exist_ok=True)
-
-file_path = "data/isl_landmarks.csv"
-
-file_exists = os.path.exists(file_path)
-
-
-# =============================
-# CAMERA
-# =============================
-
-camera = cv2.VideoCapture(
-    0,
-    cv2.CAP_DSHOW
-)
-
-if not camera.isOpened():
-    print("Camera could not be opened.")
-    landmarker.close()
+if not cap.isOpened():
+    print("ERROR: Could not open camera.")
     exit()
 
+print("\n====================================")
+print("     TWO-HAND DATA COLLECTION")
+print("====================================")
+print(f"Sign: {label}")
 print()
-print("Camera started!")
-print("Show the sign:", label)
-print("Press SPACE to save a sample.")
-print("Press Q to quit.")
+print("SPACE  -> Save sample")
+print("Q      -> Quit")
+print("====================================\n")
 
+sample_count = 0
 
-# =============================
-# CSV FILE
-# =============================
-
-with open(
-    file_path,
-    "a",
-    newline=""
-) as file:
+with open(DATA_PATH, "a", newline="") as file:
 
     writer = csv.writer(file)
 
     if not file_exists:
-
-        header = ["label"]
-
-        for i in range(21):
-            header.extend([
-                f"x{i}",
-                f"y{i}",
-                f"z{i}"
-            ])
-
         writer.writerow(header)
-
-
-    # =========================
-    # CAMERA LOOP
-    # =========================
 
     while True:
 
-        success, frame = camera.read()
+        ret, frame = cap.read()
 
-        if not success:
+        if not ret:
             print("Could not read camera.")
             break
 
-        frame = cv2.flip(
-            frame,
-            1
-        )
+        # Mirror camera
+        frame = cv2.flip(frame, 1)
 
+        # BGR -> RGB
         rgb = cv2.cvtColor(
             frame,
             cv2.COLOR_BGR2RGB
         )
 
-        mp_image = mp.Image(
-            image_format=mp.ImageFormat.SRGB,
-            data=rgb
-        )
+        # MediaPipe processing
+        results = hands.process(rgb)
 
-        result = landmarker.detect(
-            mp_image
-        )
+        # --------------------------------------------------
+        # DEFAULT: NO HAND
+        # --------------------------------------------------
 
-        # -------------------------
-        # Hand detected
-        # -------------------------
+        left_hand = [0.0] * 63
+        right_hand = [0.0] * 63
 
-        if result.hand_landmarks:
+        hands_detected = 0
 
-            cv2.putText(
-                frame,
-                "HAND DETECTED",
-                (30, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                2
+        # --------------------------------------------------
+        # EXTRACT HANDS
+        # --------------------------------------------------
+
+        if results.multi_hand_landmarks:
+
+            hands_detected = len(
+                results.multi_hand_landmarks
             )
 
-        else:
+            for hand_landmarks, handedness in zip(
+                results.multi_hand_landmarks,
+                results.multi_handedness
+            ):
 
-            cv2.putText(
-                frame,
-                "SHOW YOUR HAND",
-                (30, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 255),
-                2
-            )
+                hand = []
 
+                for landmark in hand_landmarks.landmark:
 
-        cv2.putText(
-            frame,
-            "SPACE = SAVE SAMPLE",
-            (30, 90),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (255, 255, 255),
-            2
-        )
-
-        cv2.putText(
-            frame,
-            "Q = QUIT",
-            (30, 120),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (255, 255, 255),
-            2
-        )
-
-
-        cv2.imshow(
-            "ISL Dataset Collection",
-            frame
-        )
-
-
-        # =========================
-        # KEYBOARD
-        # =========================
-
-        key = cv2.waitKey(1) & 0xFF
-
-
-        # Save sample
-        if key == 32:
-
-            if result.hand_landmarks:
-
-                landmarks = result.hand_landmarks[0]
-
-                row = [label]
-
-                for landmark in landmarks:
-
-                    row.extend([
+                    hand.extend([
                         landmark.x,
                         landmark.y,
                         landmark.z
                     ])
 
-                writer.writerow(row)
+                hand_type = handedness.classification[0].label
 
-                file.flush()
+                if hand_type == "Left":
+                    left_hand = hand
 
-                print(
-                    f"Saved sample for {label}"
+                elif hand_type == "Right":
+                    right_hand = hand
+
+                # Draw landmarks
+                mp_drawing.draw_landmarks(
+                    frame,
+                    hand_landmarks,
+                    mp_hands.HAND_CONNECTIONS
                 )
 
-            else:
+        # --------------------------------------------------
+        # DISPLAY
+        # --------------------------------------------------
 
-                print(
-                    "No hand detected. "
-                    "Try again."
-                )
+        cv2.putText(
+            frame,
+            f"Sign: {label}",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            2
+        )
 
+        cv2.putText(
+            frame,
+            f"Hands: {hands_detected}/2",
+            (20, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2
+        )
 
-        # Quit
-        if key == ord("q"):
+        cv2.putText(
+            frame,
+            f"Samples: {sample_count}",
+            (20, 120),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2
+        )
 
+        cv2.putText(
+            frame,
+            "SPACE = Save | Q = Quit",
+            (20, 160),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2
+        )
+
+        cv2.imshow(
+            "Two-Hand Sign Collection",
+            frame
+        )
+
+        # --------------------------------------------------
+        # KEYBOARD
+        # --------------------------------------------------
+
+        key = cv2.waitKey(1) & 0xFF
+
+        # SPACE
+        if key == 32:
+
+            row = (
+                [label]
+                + left_hand
+                + right_hand
+            )
+
+            writer.writerow(row)
+            file.flush()
+
+            sample_count += 1
+
+            print(
+                f"Saved sample {sample_count}"
+            )
+
+        # Q
+        elif key == ord("q"):
             break
 
-
-# =============================
+# --------------------------------------------------
 # CLEANUP
-# =============================
+# --------------------------------------------------
 
-camera.release()
-
-landmarker.close()
-
+cap.release()
 cv2.destroyAllWindows()
+hands.close()
 
-print()
-print("Dataset collection finished.")
-print("Saved to:", file_path)
+print("\n====================================")
+print("Collection finished!")
+print(f"Samples collected: {sample_count}")
+print(f"Saved to: {DATA_PATH}")
+print("====================================")
