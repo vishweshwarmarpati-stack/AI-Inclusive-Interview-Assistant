@@ -1,10 +1,11 @@
 streamlit
 opencv-python-headless
-numpy
+numpy==1.26.4
 pandas
-scikit-learn
+scikit-learn==1.9.1
 joblib
-mediapipe
+mediapipe==0.10.21
+protobuf==4.25.9
 pyttsx3
 av
 streamlit-webrtc
